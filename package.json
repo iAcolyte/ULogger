@@ -1,0 +1,14 @@
+{
+    "name": "com.letsflystudio.ulogger",
+    "version": "0.1.0",
+    "displayName": "ULogger",
+    "description": "Extended logger with multiple outputs and log levels",
+    "unity": "2021.3",
+    "unityRelease": "12f1",
+    "dependencies": {},
+    "keywords": [],
+    "author": {
+        "name": "iAcolyte",
+        "email": "iacolyte@yandex.ru"
+    }
+}
