@@ -2,7 +2,6 @@ using System.Text;
 using UnityEngine;
 
 namespace ULogger {
-    [CreateAssetMenu(fileName = "ConsoleLogger", menuName = "ULogger/Console")]
     public class ConsoleLogger: UAbstractLogger {
 
         public bool time = true;
