@@ -34,7 +34,7 @@ namespace ULogger {
             var sb = new StringBuilder();
             if (time) AppendTime(sb);
             if (levelPrefix) AppendPrefix(logLevel, sb);
-            sb.Append(message);
+            sb.Append(message.Replace('{', '(').Replace('}', ')'));
             var logType = logLevel switch {
                 LogLevel.Warn => LogType.Warning,
                 LogLevel.Error or LogLevel.Fatal => LogType.Error,
