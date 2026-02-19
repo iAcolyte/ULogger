@@ -2,7 +2,7 @@
 
 ## Installation
 
-Use **Package Manager** → **+** → **Install Package from git URL**.
+Use **Package Manager** → **+** → **Install Package from git URL → https://github.com/iAcolyte/ULogger.git**.
 
 ## Initialization
 
