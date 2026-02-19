@@ -1,0 +1,28 @@
+{
+    "name": "com.a-gorozhankin.ulogger",
+    "version": "1.0.0",
+    "displayName": "ULogger",
+    "description": "Logger extension for more organized and flexible logs, include file logging",
+    "unity": "2019.1",
+    "unityRelease": "0b5",
+    "documentationUrl": "",
+    "changelogUrl": "",
+    "licensesUrl": "",
+    "keywords": [
+        "Logger",
+        "Logging",
+        "Logs"
+    ],
+    "samples": [
+        {
+            "displayName": "MonoLogger",
+            "description": "Simple implementation of ULogger as MonoBehaviour",
+            "path": "Samples~/MonoLogger"
+        }
+    ],
+    "author": {
+        "name": "A. Gorozhankin",
+        "email": "alexgorozh@gmail.com",
+        "url": "https://www.unity3d.com"
+    }
+}
