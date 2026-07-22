@@ -16,6 +16,6 @@ MonoBehaviour:
   path: '%dp/Samples/ULogger/%dt.log'
   logLevel: 3
   logExceptions: 1
-  appendTimeFormat: yyyy-MM-dd hh:mm:ss.fff
+  appendTimeFormat: yyyy-MM-dd HH:mm:ss.fff
   tagFormat: '[{0}] "{1}"'
   appendLogLevel: 1

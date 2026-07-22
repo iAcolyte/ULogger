@@ -14,35 +14,36 @@ The package provides three log handler implementations:
 - `FileLogHandler` — writes logs to a text file.
 - `CompositeLogHandler` — does not output logs itself but forwards them to other attached handlers.
 
-Choose the handlers you need and create ScriptableObject assets for them (e.g. **Create → ULogger → Console Log**).
+Choose the handlers you need and create ScriptableObject assets for them (e.g. **Create → ULogger → Console Log**). Place the handler you want to install in a `Resources` folder so it can be loaded at startup.
 
-Then create a class that swaps the logging mechanism. You can use the sample from Samples:
+Then install it as early as possible via `RuntimeInitializeOnLoadMethod`, so the handler is active before any game code logs:
 
 ```csharp
-using ULogger;
 using UnityEngine;
 
-public sealed class ULogger : MonoBehaviour
+namespace ULogger
 {
-    [SerializeField] ULogHandler uLogHandler;
-    ILogHandler defaultHandler;
-
-    void OnEnable()
+    public static class ULoggerBootstrap
     {
-        defaultHandler = Debug.unityLogger.logHandler;
-        Debug.unityLogger.logHandler = uLogHandler;
-    }
-
-    void OnDisable()
-    {
-        Debug.unityLogger.logHandler = defaultHandler;
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        static void Install()
+        {
+            var handler = Resources.Load<ULogHandler>("CompositeLH");
+            if (handler != null) Debug.unityLogger.logHandler = handler;
+        }
     }
 }
 ```
 
+> **Important:** Install in `BeforeSceneLoad` (or any phase after `SubsystemRegistration`), **not** in `SubsystemRegistration`. `ConsoleLogHandler` captures Unity's original handler during `SubsystemRegistration`, and the order of methods within the same phase is undefined — installing in a later phase guarantees the capture happens first, so console output is not lost.
+
+If you prefer to scope logging to a specific scene, a `MonoBehaviour` that swaps `Debug.unityLogger.logHandler` in `OnEnable` and restores it in `OnDisable` works too (see the `MonoLogger` sample).
+
 ## Usage
 
 You can use `Debug.Log*` as usual. However, the package makes heavy use of **tags**. To leverage them, use `Debug.unityLogger.Log("TAG", "Message")`.
+
+> **Note:** Tag detection relies on Unity formatting `Logger.Log(tag, message)` calls with the internal `"{0}: {1}"` format string. Only messages logged through the `Debug.unityLogger.Log*(tag, message)` overloads are recognized as tagged; plain `Debug.Log` messages are always treated as untagged.
 
 ### Tag Filtering
 
@@ -65,13 +66,14 @@ Keeps log output in the Unity Console while giving you control over formatting a
 
 #### FileLogHandler
 
-Writes logs to a text file. The `path` field supports dynamic variables.
+Writes logs to a text file. Any missing directories in the path are created automatically. The `path` field supports dynamic variables.
 
 - `path` — file path for the log. Example: **%pdp/logs/%dt.log**. Supported variables:
   - `%pdp` — `Application.persistentDataPath`
   - `%dp` — `Application.dataPath`
-  - `%dt` — `DateTime.Now.ToString("yyyy_MM_dd_hh_mm_ss")`
+  - `%dt` — `DateTime.Now.ToString("yyyy_MM_dd_HH_mm_ss")`
 - `logLevel` — minimum log level. Messages below this level are not written.
-- `appendTimeFormat` (default `"yyyy-MM-dd hh:mm:ss.fff"`) — timestamp format prepended to each line. Clear the value to disable timestamps.
+- `logExceptions` — whether exceptions are written to the file (defaults to `true`).
+- `appendTimeFormat` (default `"yyyy-MM-dd HH:mm:ss.fff"`) — timestamp format prepended to each line. Clear the value to disable timestamps.
 - `tagFormat` — defaults to `"[{0}] \"{1}\""`. Overrides the format string for tagged messages. Leave empty to hide tags.
 - `appendLogLevel` — whether to include the log level label in the output.

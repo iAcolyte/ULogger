@@ -6,7 +6,6 @@ using System.Text;
 using UnityEngine;
 
 namespace ULogger {
-    [DefaultExecutionOrder(int.MinValue)]
     [CreateAssetMenu(fileName = "ConsoleLogHandler", menuName = "ULogger/Console Log")]
     public sealed class ConsoleLogHandler: ULogHandler {
         const string warningColor = nameof(Color.yellow);
@@ -14,7 +13,19 @@ namespace ULogger {
         const string assertColor = nameof(Color.magenta);
 
         static readonly Color InfoColor = Color.gray;
-        static readonly ILogHandler defaultHandler = Debug.unityLogger.logHandler;
+
+        // Unity's original handler, captured before any ULogHandler is installed (which happens no
+        // earlier than scene load). Forwarding here must never reach a ULogHandler, or the console
+        // would loop back into itself. The guard protects against state that survived a disabled
+        // domain reload.
+        static ILogHandler? defaultHandler;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void CaptureDefaultHandler() {
+            if (Debug.unityLogger.logHandler is not ULogHandler) {
+                defaultHandler = Debug.unityLogger.logHandler;
+            }
+        }
 
         readonly StringBuilder builder = new();
 

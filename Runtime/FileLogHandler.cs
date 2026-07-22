@@ -14,12 +14,16 @@ namespace ULogger {
 
         [Header("Settings")]
         [Tooltip("You can use special '%pdp' or '%dp' variables as persistentDataPath or DataPath, and '%dt' for datetime")]
-        [SerializeField] string path;
+        [SerializeField] string path = string.Empty;
         [SerializeField] LogType logLevel = LogType.Log;
+        [SerializeField] bool logExceptions = true;
         [Header("Formatting")]
-        [SerializeField] string appendTimeFormat = "yyyy-MM-dd hh:mm:ss.fff";
+        [SerializeField] string appendTimeFormat = "yyyy-MM-dd HH:mm:ss.fff";
         [SerializeField] string tagFormat = "[{0}] \"{1}\"";
         [SerializeField] bool appendLogLevel = true;
+
+        string? _path;
+        StreamWriter? _writer;
 
         string Path {
             get {
@@ -32,34 +36,53 @@ namespace ULogger {
                     _path = Application.dataPath + _path[3..];
                 }
                 if (_path.Contains("%dt")) {
-                    _path = _path.Replace("%dt", DateTime.Now.ToString("yyyy_MM_dd_hh_mm_ss"));
+                    _path = _path.Replace("%dt", DateTime.Now.ToString("yyyy_MM_dd_HH_mm_ss"));
                 }
                 return _path;
             }
         }
+
+        protected override object DedupScope => Path;
+
         StreamWriter Writer {
             get {
                 if (_writer is not null) return _writer;
                 var info = new FileInfo(Path);
+                info.Directory?.Create();
                 _writer = info.Exists ? info.AppendText() : info.CreateText();
-                Application.quitting += ((IDisposable)this).Dispose;
+                _writer.AutoFlush = true;
+                Application.quitting += CloseWriter;
+#if UNITY_EDITOR
+                UnityEditor.EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+#endif
                 return _writer;
             }
         }
 
-        string? _path;
-        StreamWriter? _writer;
-
-        void OnValidate() {
-            if (_writer is not null) {
-                _writer.Close();
-                _writer.Dispose();
-            }
+        void CloseWriter() {
+            Application.quitting -= CloseWriter;
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+#endif
             _path = null;
+            if (_writer is null) return;
+            _writer.Close();
+            _writer.Dispose();
             _writer = null;
         }
 
+#if UNITY_EDITOR
+        void OnPlayModeStateChanged(UnityEditor.PlayModeStateChange state) {
+            if (state == UnityEditor.PlayModeStateChange.ExitingPlayMode) CloseWriter();
+        }
+#endif
+
+        void OnValidate() {
+            CloseWriter();
+        }
+
         protected override void LogExceptionInherit(Exception exception, UnityEngine.Object context) {
+            if (!logExceptions) return;
             var full = exception.ToString().Replace("\r\n", " ").Replace("\n", " ");
 
             var colonIndex = full.IndexOf(':');
@@ -112,15 +135,9 @@ namespace ULogger {
                 builder.Append(args[^1]);
             }
             Writer.WriteLine(builder.ToString());
-            _ = Writer.FlushAsync();
             return true;
         }
 
-        void IDisposable.Dispose() {
-            Application.quitting -= ((IDisposable)this).Dispose;
-            if (_writer is null) return;
-            _writer.Close();
-            _writer.Dispose();
-        }
+        void IDisposable.Dispose() => CloseWriter();
     }
 }
