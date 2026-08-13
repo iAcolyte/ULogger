@@ -57,6 +57,7 @@ namespace ULogger {
         [SerializeField] bool useColors = false;
 
         protected override void LogExceptionInherit(Exception exception, UnityEngine.Object context) {
+            if (exception is IOverrideContextForException overriddenContext) context = overriddenContext.Context;
             defaultHandler?.LogException(exception, context);
         }
 
