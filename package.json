@@ -1,6 +1,6 @@
 {
     "name": "com.a-gorozhankin.ulogger",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "displayName": "ULogger",
     "description": "Logger extension for more organized and flexible logs, include file logging",
     "unity": "2019.1",

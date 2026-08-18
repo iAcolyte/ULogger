@@ -61,11 +61,12 @@ namespace ULogger {
             defaultHandler?.LogException(exception, context);
         }
 
-        protected override bool LogFormatInherit(LogType logType, UnityEngine.Object context, string _, params object[] args) {
+        protected override bool LogFormatInherit(LogType logType, UnityEngine.Object context, string format, params object[] args) {
             if (logType > logLevel) {
                 return false;
             }
-            var formatOverride = args.Length == 1 ? "{0}" : !string.IsNullOrEmpty(tagFormatOverride) ? tagFormatOverride : "{0}";
+            var formatOverride = args.Length == 0 ? format : args.Length == 1 ? "{0}" : !string.IsNullOrEmpty(tagFormatOverride) ? tagFormatOverride : format;
+
             defaultHandler?.LogFormat(logType, context, ModifyFormat(useColors, infoColor, logType, formatOverride, builder), args);
 
             return true;
