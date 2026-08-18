@@ -58,8 +58,7 @@ namespace ULogger {
                     if (LogFormatInherit(logType, context, format, args)) dispatched.Add(key);
                     return;
                 }
-                if (format != TaggedFormat) return;
-                if (args[0] is not string tag || !Tags.Contains(tag)) return;
+                if (args.Length == 0 || args[0] is not string tag || !Tags.Contains(tag)) return;
                 if (LogFormatInherit(logType, context, format, args)) dispatched.Add(key);
             } finally {
                 dispatchDepth--;

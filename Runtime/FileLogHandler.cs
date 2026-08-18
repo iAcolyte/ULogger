@@ -127,7 +127,9 @@ namespace ULogger {
                 builder.Append(result.log).Append(result.tabs);
             }
 
-            if (args.Length > 1 && !string.IsNullOrEmpty(tagFormat)) {
+            if (args.Length == 0) {
+                builder.Append(format);
+            } else if (args.Length > 1 && !string.IsNullOrEmpty(tagFormat)) {
                 builder.AppendFormat(logType != LogType.Exception ? tagFormat : format, args);
             } else if (logType != LogType.Exception) {
                 builder.Append('"').Append(args[0]).Append('"');
