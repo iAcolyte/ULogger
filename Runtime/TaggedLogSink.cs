@@ -125,33 +125,33 @@ namespace ULogger {
         }
 
 
-        public void Warn(string message) {
+        public void Warning(string message) {
             if (!Sink.IsEnabled(LogLevel.Warning)) return;
             Sink.Write(LogLevel.Warning, Tag.AsSpan(), message.AsSpan(), Context);
         }
 
-        public void Warn<T0>(string format, T0 a0) {
+        public void Warning<T0>(string format, T0 a0) {
             if (!Sink.IsEnabled(LogLevel.Warning)) return;
             var b = LogFormatter.Scratch;
             LogFormatter.Format(b, format, a0);
             Sink.Write(LogLevel.Warning, Tag.AsSpan(), b.Span, Context);
         }
 
-        public void Warn<T0, T1>(string format, T0 a0, T1 a1) {
+        public void Warning<T0, T1>(string format, T0 a0, T1 a1) {
             if (!Sink.IsEnabled(LogLevel.Warning)) return;
             var b = LogFormatter.Scratch;
             LogFormatter.Format(b, format, a0, a1);
             Sink.Write(LogLevel.Warning, Tag.AsSpan(), b.Span, Context);
         }
 
-        public void Warn<T0, T1, T2>(string format, T0 a0, T1 a1, T2 a2) {
+        public void Warning<T0, T1, T2>(string format, T0 a0, T1 a1, T2 a2) {
             if (!Sink.IsEnabled(LogLevel.Warning)) return;
             var b = LogFormatter.Scratch;
             LogFormatter.Format(b, format, a0, a1, a2);
             Sink.Write(LogLevel.Warning, Tag.AsSpan(), b.Span, Context);
         }
 
-        public void Warn<T0, T1, T2, T3>(string format, T0 a0, T1 a1, T2 a2, T3 a3) {
+        public void Warning<T0, T1, T2, T3>(string format, T0 a0, T1 a1, T2 a2, T3 a3) {
             if (!Sink.IsEnabled(LogLevel.Warning)) return;
             var b = LogFormatter.Scratch;
             LogFormatter.Format(b, format, a0, a1, a2, a3);
