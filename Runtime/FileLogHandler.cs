@@ -16,6 +16,10 @@ namespace ULogger {
         [SerializeField] string path = string.Empty;
         [SerializeField] LogType logLevel = LogType.Log;
         [SerializeField] bool logExceptions = true;
+        [Tooltip("Open the log file on enable instead of on the first message. Required if the first log " +
+                 "entry may come from a background thread: opening it resolves the path and subscribes to " +
+                 "Unity events, both of which are main-thread only.")]
+        [SerializeField] bool openWriterOnEnable;
 
         [Header("Formatting")]
         [Tooltip("Supported tokens: yyyy yy MM dd HH hh mm ss fff ff f. Everything else is a literal. Empty = no timestamp.")]
@@ -34,6 +38,7 @@ namespace ULogger {
 
         string? _path;
         AsyncFileWriter? _writer;
+        readonly object _writerLock = new();
 
         const int MinBufferBytes = 4096;
         const int MinBufferToMessageRatio = 8;
@@ -67,26 +72,36 @@ namespace ULogger {
 
         AsyncFileWriter Writer {
             get {
-                if (_writer is not null) return _writer;
+                var existing = Volatile.Read(ref _writer);
+                if (existing is not null) return existing;
 
-                _writer = new AsyncFileWriter(Path, Math.Max(bufferBytes, MinBufferBytes));
-                Application.quitting += CloseWriter;
+                lock (_writerLock) {
+                    if (_writer is not null) return _writer;
+
+                    var created = new AsyncFileWriter(Path, Math.Max(bufferBytes, MinBufferBytes));
+                    Application.quitting += CloseWriter;
 #if UNITY_EDITOR
-                UnityEditor.EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+                    UnityEditor.EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
 #endif
-                return _writer;
+                    Volatile.Write(ref _writer, created);
+                    return created;
+                }
             }
         }
 
         void CloseWriter() {
-            Application.quitting -= CloseWriter;
+            lock (_writerLock) {
+                Application.quitting -= CloseWriter;
 #if UNITY_EDITOR
-            UnityEditor.EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+                UnityEditor.EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
 #endif
-            _path = null;
-            if (_writer is null) return;
-            _writer.Dispose();
-            _writer = null;
+                _path = null;
+                if (_writer is null) return;
+
+                var writer = _writer;
+                Volatile.Write(ref _writer, null);
+                writer.Dispose();
+            }
         }
 
 #if UNITY_EDITOR
@@ -102,6 +117,8 @@ namespace ULogger {
             CompileLevelLabels();
             RefreshUtcOffset();
             _ = Path;
+            // Edit mode fires OnEnable on asset load; do not create a log file just for that.
+            if (openWriterOnEnable && Application.isPlaying) _ = Writer;
         }
 
         void OnValidate() {
@@ -138,16 +155,7 @@ namespace ULogger {
         protected override bool LogFormatInherit(LogType logType, UnityEngine.Object? context, string format, params object[] args) {
             if (logType != LogType.Exception && logType > logLevel) return false;
 
-            var b = _scratch ??= new ByteBuffer(4096);
-            b.Length = 0;
-
-            if (_timeParts is { Length: > 0 }) WriteTimestamp(b);
-
-            if (appendLogLevel) {
-                var labels = _levelLabels ??= BuildLevelLabels();
-                var idx = (int)logType;
-                b.Write((uint)idx < (uint)labels.Length ? labels[idx] : labels[(int)LogType.Log]);
-            }
+            var b = BeginEntry(logType);
 
             if (args.Length == 0) {
                 WriteText(b, format.AsSpan());
@@ -161,42 +169,65 @@ namespace ULogger {
                 WriteValue(b, args[^1]);
             }
 
-            Truncate(b);
-
-            if (b.Length == 0 || b.Data[b.Length - 1] != (byte)'\n') b.Write((byte)'\n');
-
-            var urgent = logType is LogType.Error or LogType.Assert or LogType.Exception;
-            Writer.Enqueue(new ReadOnlySpan<byte>(b.Data, 0, b.Length), urgent);
+            EndEntry(b, logType is LogType.Error or LogType.Assert or LogType.Exception);
             return true;
+        }
+
+        ByteBuffer BeginEntry(LogType logType) {
+            var b = _scratch ??= new ByteBuffer(4096);
+            b.Length = 0;
+
+            if (_timeParts is { Length: > 0 }) WriteTimestamp(b);
+
+            if (appendLogLevel) {
+                var labels = _levelLabels ??= BuildLevelLabels();
+                var idx = (int)logType;
+                b.Write((uint)idx < (uint)labels.Length ? labels[idx] : labels[(int)LogType.Log]);
+            }
+
+            return b;
+        }
+
+        void EndEntry(ByteBuffer b, bool urgent) {
+            Truncate(b);
+            if (b.Length == 0 || b.Data[b.Length - 1] != (byte)'\n') b.Write((byte)'\n');
+            Writer.Enqueue(new ReadOnlySpan<byte>(b.Data, 0, b.Length), urgent);
         }
 
         protected override void LogExceptionInherit(Exception exception, UnityEngine.Object context) {
             if (!logExceptions) return;
 
-            var full = exception.ToString();
+            // ToString() is the one allocation we cannot avoid: it builds the message and the
+            // stack trace. Everything past it is sliced as spans straight into the byte buffer.
+            var full = exception.ToString().AsSpan();
+            var b = BeginEntry(LogType.Exception);
 
             var colonIndex = full.IndexOf(':');
             if (colonIndex < 0) {
-                LogFormatInherit(LogType.Exception, context, "[{0}] {1}", "Exception", full);
+                WriteAscii(b, "[Exception] ");
+                WriteText(b, full);
+                EndEntry(b, urgent: true);
                 return;
             }
 
-            var typeName = full[..colonIndex];
             var rest = full[(colonIndex + 1)..].TrimStart();
+            var atIndex = rest.IndexOf("   at ".AsSpan(), StringComparison.Ordinal);
+            if (atIndex < 0) atIndex = rest.IndexOf(" at ".AsSpan(), StringComparison.Ordinal);
 
-            var atIndex = rest.IndexOf("   at ", StringComparison.Ordinal);
-            if (atIndex < 0) atIndex = rest.IndexOf(" at ", StringComparison.Ordinal);
+            b.Write((byte)'[');
+            WriteText(b, full[..colonIndex]);
+            WriteAscii(b, "] \"");
 
-            string formatted;
             if (atIndex >= 0) {
-                var message = rest[..atIndex].Trim();
-                var trace = rest[atIndex..].Trim();
-                formatted = $"\"{message}\" {trace}";
+                WriteText(b, rest[..atIndex].Trim());
+                WriteAscii(b, "\" ");
+                WriteText(b, rest[atIndex..].Trim());
             } else {
-                formatted = $"\"{rest.Trim()}\"";
+                WriteText(b, rest.Trim());
+                b.Write((byte)'"');
             }
 
-            LogFormatInherit(LogType.Exception, context, "[{0}] {1}", typeName, formatted);
+            EndEntry(b, urgent: true);
         }
 
         void WriteFormat(ByteBuffer b, string format, object[] args) {
@@ -252,18 +283,44 @@ namespace ULogger {
                 case int v: WriteInt(b, v); return;
                 case long v: WriteInt(b, v); return;
                 case uint v: WriteInt(b, v); return;
-                case ulong v: WriteInt(b, (long)v); return;
+                case ulong v: WriteUInt(b, v); return;
                 case short v: WriteInt(b, v); return;
+                case ushort v: WriteInt(b, v); return;
                 case byte v: WriteInt(b, v); return;
+                case sbyte v: WriteInt(b, v); return;
                 case bool v: WriteAscii(b, v ? "True" : "False"); return;
                 case float v: WriteFloat(b, v); return;
                 case double v: WriteFloat(b, v); return;
+                case decimal v: WriteDecimal(b, v); return;
+                case char v: WriteChar(b, v); return;
+                // Enum.ToString() goes through reflection and allocates; print the numeric value.
+                case Enum v: WriteEnum(b, v); return;
                 default: WriteText(b, value.ToString().AsSpan()); return;
             }
         }
 
+        void WriteChar(ByteBuffer b, char value) {
+            Span<char> one = stackalloc char[1];
+            one[0] = value;
+            WriteText(b, one);
+        }
+
+        static void WriteEnum(ByteBuffer b, Enum value) {
+            if (Type.GetTypeCode(value.GetType()) == TypeCode.UInt64) WriteUInt(b, Convert.ToUInt64(value));
+            else WriteInt(b, Convert.ToInt64(value));
+        }
+
         void WriteText(ByteBuffer b, ReadOnlySpan<char> s) {
             if (s.Length == 0) return;
+
+            // Never grow the scratch buffer far past the limit: Truncate would throw the tail away
+            // anyway, but the enlarged array would stay alive on this thread forever. One extra char
+            // is kept so Truncate still sees an overflow and appends its marker.
+            if (maxMessageBytes > 0) {
+                if (b.Length >= maxMessageBytes) return;
+                var room = maxMessageBytes - b.Length;
+                if (s.Length > room) s = s[..(room + 1)];
+            }
 
             b.Ensure(s.Length * 3);
             var data = b.Data;
@@ -306,10 +363,26 @@ namespace ULogger {
             b.Length += written;
         }
 
+        static void WriteUInt(ByteBuffer b, ulong value) {
+            b.Ensure(20);
+            Utf8Formatter.TryFormat(value, new Span<byte>(b.Data, b.Length, b.Data.Length - b.Length), out var written);
+            b.Length += written;
+        }
+
         static void WriteFloat(ByteBuffer b, double value) {
             b.Ensure(32);
             if (Utf8Formatter.TryFormat(value, new Span<byte>(b.Data, b.Length, b.Data.Length - b.Length), out var written))
                 b.Length += written;
+            else
+                WriteAscii(b, "NaN");
+        }
+
+        static void WriteDecimal(ByteBuffer b, decimal value) {
+            b.Ensure(32);
+            if (Utf8Formatter.TryFormat(value, new Span<byte>(b.Data, b.Length, b.Data.Length - b.Length), out var written))
+                b.Length += written;
+            else
+                WriteAscii(b, "NaN");
         }
 
         void Truncate(ByteBuffer b) {
