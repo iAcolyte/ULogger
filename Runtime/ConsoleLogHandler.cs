@@ -46,19 +46,35 @@ namespace ULogger {
 
 
         [SerializeField] Color infoColor = InfoColor;
-        [SerializeField] LogType logLevel = LogType.Log;
+        [SerializeField] LogLevel minLevel = LogLevel.Trace;
         [SerializeField] string tagFormatOverride = "{0}: {1}";
         [SerializeField] bool useColors = false;
 
         readonly StringBuilder builder = new();
+        readonly StringBuilder builder2 = new();
 
         protected override void LogExceptionInherit(Exception exception, UnityEngine.Object? context) {
             if (exception is IOverrideContextForException overriddenContext) context = overriddenContext.Context;
             defaultHandler?.LogException(exception, context);
         }
 
+        protected override bool IsEnabledInherit(LogLevel level) => level >= minLevel;
+
+        protected override void WriteInherit(LogLevel level, ReadOnlySpan<char> tag, ReadOnlySpan<char> message, UnityEngine.Object? context) {
+            // Unity's handler takes a string, so this path allocates one by definition; the
+            // message is passed as an argument rather than as the format so that braces inside
+            // it are not re-interpreted by string.Format.
+            builder.Clear();
+            if (tag.Length > 0) builder.Append('[').Append(tag).Append("] ");
+            builder.Append(message);
+
+            var logType = ToLogType(level);
+            defaultHandler?.LogFormat(logType, context,
+                ModifyFormat(useColors, infoColor, logType, "{0}", builder2), builder.ToString());
+        }
+
         protected override bool LogFormatInherit(LogType logType, UnityEngine.Object? context, string format, params object[] args) {
-            if (logType > logLevel) {
+            if (ToLogLevel(logType) < minLevel) {
                 return false;
             }
             var formatOverride = args.Length == 0 ? format : args.Length == 1 ? "{0}" : !string.IsNullOrEmpty(tagFormatOverride) ? tagFormatOverride : format;

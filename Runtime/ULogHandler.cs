@@ -6,7 +6,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 namespace ULogger {
-    public abstract class ULogHandler: ScriptableObject, ILogHandler {
+    public abstract class ULogHandler: ScriptableObject, ILogHandler, ILogSink {
         // Dedup state is per-thread: handlers may be driven from background threads, and a shared
         // HashSet would corrupt under concurrent mutation. Deduplication is only meaningful within
         // a single dispatch anyway, and a dispatch never spans threads.
@@ -69,6 +69,57 @@ namespace ULogger {
                 dispatchDepth--;
             }
         }
+
+        // ------------------------------------------------------------------ ILogSink
+
+        // The zero-allocation path. It carries no deduplication: unlike Unity's handler chain,
+        // nothing here dispatches the same entry twice, and hashing spans would defeat the point.
+
+        public bool IsEnabled(LogLevel level) => level != LogLevel.Off && IsEnabledInherit(level);
+
+        public void Write(LogLevel level, ReadOnlySpan<char> tag, ReadOnlySpan<char> message, UnityEngine.Object? context) {
+            if (!IsEnabled(level) || !TagAllowed(tag)) return;
+            WriteInherit(level, tag, message, context);
+        }
+
+        // Intentionally not tag-filtered: a handler configured with tags would otherwise swallow
+        // every exception reaching it untagged, which is the one class of entry worth never losing.
+        public void WriteException(Exception exception, UnityEngine.Object? context) {
+            if (!IsEnabled(LogLevel.Error)) return;
+            LogExceptionInherit(exception, context);
+        }
+
+        // A handler with tags accepts tagged entries only, so an untagged call is dropped. This
+        // mirrors the ILogHandler path and is what makes a tag list a filter rather than a label.
+        bool TagAllowed(ReadOnlySpan<char> tag) {
+            if (tags.Length == 0) return true;
+            // Few tags in practice, and a HashSet cannot be probed with a span on netstandard 2.1.
+            for (var i = 0; i < tags.Length; i++)
+                if (tag.SequenceEqual(tags[i].AsSpan())) return true;
+            return false;
+        }
+
+        protected virtual bool IsEnabledInherit(LogLevel level) => true;
+
+        protected abstract void WriteInherit(LogLevel level, ReadOnlySpan<char> tag, ReadOnlySpan<char> message, UnityEngine.Object? context);
+
+        // ------------------------------------------------------------------ shared
+
+        /// <summary>Maps to Unity's inverted, coarser severity scale.</summary>
+        public static LogType ToLogType(LogLevel level) => level switch {
+            LogLevel.Warning => LogType.Warning,
+            LogLevel.Error => LogType.Error,
+            LogLevel.Critical => LogType.Exception,
+            _ => LogType.Log
+        };
+
+        /// <summary>Maps back, for handlers whose filter is still expressed as a LogType.</summary>
+        public static LogLevel ToLogLevel(LogType type) => type switch {
+            LogType.Warning => LogLevel.Warning,
+            LogType.Error or LogType.Assert => LogLevel.Error,
+            LogType.Exception => LogLevel.Critical,
+            _ => LogLevel.Info
+        };
 
         protected virtual object DedupScope => Type;
 

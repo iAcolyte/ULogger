@@ -14,7 +14,7 @@ namespace ULogger {
         [Header("Settings")]
         [Tooltip("You can use special '%pdp' or '%dp' variables as persistentDataPath or DataPath, and '%dt' for datetime")]
         [SerializeField] string path = string.Empty;
-        [SerializeField] LogType logLevel = LogType.Log;
+        [SerializeField] LogLevel minLevel = LogLevel.Trace;
         [SerializeField] bool logExceptions = true;
         [Tooltip("Open the log file on enable instead of on the first message. Required if the first log " +
                  "entry may come from a background thread: opening it resolves the path and subscribes to " +
@@ -152,8 +152,25 @@ namespace ULogger {
 
         void IDisposable.Dispose() => CloseWriter();
 
+        protected override bool IsEnabledInherit(LogLevel level) => level >= minLevel;
+
+        protected override void WriteInherit(LogLevel level, ReadOnlySpan<char> tag, ReadOnlySpan<char> message, UnityEngine.Object? context) {
+            var b = BeginEntry(ToLogType(level));
+
+            if (tag.Length > 0) {
+                b.Write((byte)'[');
+                WriteText(b, tag);
+                WriteAscii(b, "] ");
+            }
+            b.Write((byte)'"');
+            WriteText(b, message);
+            b.Write((byte)'"');
+
+            EndEntry(b, level >= LogLevel.Error);
+        }
+
         protected override bool LogFormatInherit(LogType logType, UnityEngine.Object? context, string format, params object[] args) {
-            if (logType != LogType.Exception && logType > logLevel) return false;
+            if (logType != LogType.Exception && ToLogLevel(logType) < minLevel) return false;
 
             var b = BeginEntry(logType);
 

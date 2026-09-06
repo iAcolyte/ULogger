@@ -50,6 +50,22 @@ namespace ULogger {
             }
         }
 
+        protected override bool IsEnabledInherit(LogLevel level) {
+            foreach (var logHandler in logHandlers)
+                if (logHandler != null && logHandler.IsEnabled(level)) return true;
+            return false;
+        }
+
+        protected override void WriteInherit(LogLevel level, ReadOnlySpan<char> tag, ReadOnlySpan<char> message, UnityEngine.Object? context) {
+            var active = dispatching ??= new HashSet<CompositeLogHandler>();
+            if (!active.Add(this)) return;
+            try {
+                foreach (var logHandler in logHandlers) logHandler?.Write(level, tag, message, context);
+            } finally {
+                active.Remove(this);
+            }
+        }
+
         protected override bool LogFormatInherit(LogType logType, UnityEngine.Object? context, string format, params object[] args) {
             var active = dispatching ??= new HashSet<CompositeLogHandler>();
             if (!active.Add(this)) return false;
