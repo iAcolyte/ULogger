@@ -21,10 +21,27 @@ namespace ULogger {
 
         // Unity's Logger.Log(tag, message) renders through this exact format string, and that is
         // how a tagged call is recognized here. Coupled to a Unity internal detail: logging with
-        // this literal format directly is likewise treated as tagged.
-        const string TaggedFormat = "{0}: {1}";
+        // this literal format and exactly two arguments is likewise treated as tagged.
+        protected const string TaggedFormat = "{0}: {1}";
+
+        /// <summary>
+        /// Whether an <see cref="ILogHandler.LogFormat"/> call is Unity's tag+message form. The
+        /// shape is checked as a whole -- format, arity and the type of the first argument -- so a
+        /// genuine two-argument LogFormat with some other format string is not mistaken for one.
+        /// </summary>
+        protected static bool IsTaggedCall(string format, object[] args) =>
+            args.Length == 2 && args[0] is string && format == TaggedFormat;
 
         [SerializeField] string[] tags = System.Array.Empty<string>();
+
+        [Tooltip("Emit exceptions at all. Independent of Min Level, which exceptions also pass through " +
+                 "as LogLevel.Critical.")]
+        [SerializeField] bool logExceptions = true;
+
+        // One rule for every entry point: an exception is an entry of level Critical, plus an
+        // explicit opt-out. Previously each path filtered differently and the same exception could
+        // reach one handler and not another depending on which API produced it.
+        bool ExceptionsEnabled => logExceptions && IsEnabled(LogLevel.Critical);
 
         HashSet<string> Tags => _tags ??= new HashSet<string>(tags);
         Type Type => _type ??= this.GetType();
@@ -33,6 +50,8 @@ namespace ULogger {
         Type? _type;
 
         public void LogException(Exception exception, UnityEngine.Object? context) {
+            if (!ExceptionsEnabled) return;
+
             var signature = HashCode.Combine(exception, context);
             var seen = dispatched ??= new HashSet<(object, int)>();
 
@@ -63,7 +82,8 @@ namespace ULogger {
                     if (LogFormatInherit(logType, context, format, args)) seen.Add(key);
                     return;
                 }
-                if (args.Length == 0 || args[0] is not string tag || !Tags.Contains(tag)) return;
+                // A handler with tags accepts tagged calls only, and only for its own tags.
+                if (!IsTaggedCall(format, args) || !Tags.Contains((string)args[0])) return;
                 if (LogFormatInherit(logType, context, format, args)) seen.Add(key);
             } finally {
                 dispatchDepth--;
@@ -84,8 +104,9 @@ namespace ULogger {
 
         // Intentionally not tag-filtered: a handler configured with tags would otherwise swallow
         // every exception reaching it untagged, which is the one class of entry worth never losing.
+        // Level-filtered as Critical, matching ToLogType(LogLevel.Critical) == LogType.Exception.
         public void WriteException(Exception exception, UnityEngine.Object? context) {
-            if (!IsEnabled(LogLevel.Error)) return;
+            if (!ExceptionsEnabled) return;
             LogExceptionInherit(exception, context);
         }
 

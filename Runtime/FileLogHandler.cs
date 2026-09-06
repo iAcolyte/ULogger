@@ -15,7 +15,6 @@ namespace ULogger {
         [Tooltip("You can use special '%pdp' or '%dp' variables as persistentDataPath or DataPath, and '%dt' for datetime")]
         [SerializeField] string path = string.Empty;
         [SerializeField] LogLevel minLevel = LogLevel.Trace;
-        [SerializeField] bool logExceptions = true;
         [Tooltip("Open the log file on enable instead of on the first message. Required if the first log " +
                  "entry may come from a background thread: opening it resolves the path and subscribes to " +
                  "Unity events, both of which are main-thread only.")]
@@ -157,33 +156,43 @@ namespace ULogger {
         protected override void WriteInherit(LogLevel level, ReadOnlySpan<char> tag, ReadOnlySpan<char> message, UnityEngine.Object? context) {
             var b = BeginEntry(ToLogType(level));
 
-            if (tag.Length > 0) {
-                b.Write((byte)'[');
-                WriteText(b, tag);
-                WriteAscii(b, "] ");
+            if (tag.Length > 0 && !string.IsNullOrEmpty(tagFormat)) {
+                // Same tagFormat as the ILogHandler path; hardcoding the layout here made the two
+                // paths of one handler render a tag differently as soon as the format was edited.
+                WriteTagged(b, tagFormat, tag, message);
+            } else {
+                if (tag.Length > 0) {
+                    b.Write((byte)'[');
+                    WriteText(b, tag);
+                    WriteAscii(b, "] ");
+                }
+                b.Write((byte)'"');
+                WriteText(b, message);
+                b.Write((byte)'"');
             }
-            b.Write((byte)'"');
-            WriteText(b, message);
-            b.Write((byte)'"');
 
             EndEntry(b, level >= LogLevel.Error);
         }
 
         protected override bool LogFormatInherit(LogType logType, UnityEngine.Object? context, string format, params object[] args) {
-            if (logType != LogType.Exception && ToLogLevel(logType) < minLevel) return false;
+            // Exceptions map to LogLevel.Critical, so they pass any minLevel but Off; the former
+            // explicit exemption for LogType.Exception is redundant and diverged from the console.
+            if (ToLogLevel(logType) < minLevel) return false;
 
             var b = BeginEntry(logType);
 
             if (args.Length == 0) {
                 WriteText(b, format.AsSpan());
-            } else if (args.Length > 1 && !string.IsNullOrEmpty(tagFormat)) {
-                WriteFormat(b, logType != LogType.Exception ? tagFormat : format, args);
-            } else if (logType != LogType.Exception) {
+            } else if (IsTaggedCall(format, args) && !string.IsNullOrEmpty(tagFormat)) {
+                WriteFormat(b, tagFormat, args);
+            } else if (args.Length == 1 && format == "{0}") {
+                // Debug.Log(message) reaches every handler in this exact shape.
                 b.Write((byte)'"');
                 WriteValue(b, args[0]);
                 b.Write((byte)'"');
             } else {
-                WriteValue(b, args[^1]);
+                // A real format string, kept verbatim rather than replaced by tagFormat.
+                WriteFormat(b, format, args);
             }
 
             EndEntry(b, logType is LogType.Error or LogType.Assert or LogType.Exception);
@@ -212,8 +221,6 @@ namespace ULogger {
         }
 
         protected override void LogExceptionInherit(Exception exception, UnityEngine.Object? context) {
-            if (!logExceptions) return;
-
             // ToString() is the one allocation we cannot avoid: it builds the message and the
             // stack trace. Everything past it is sliced as spans straight into the byte buffer.
             var full = exception.ToString().AsSpan();
@@ -245,6 +252,42 @@ namespace ULogger {
             }
 
             EndEntry(b, urgent: true);
+        }
+
+        /// <summary>
+        /// Applies a two-placeholder tag format to spans. Separate from <see cref="WriteFormat"/>
+        /// because the sink path never materializes the tag or the message as a string.
+        /// </summary>
+        void WriteTagged(ByteBuffer b, string format, ReadOnlySpan<char> tag, ReadOnlySpan<char> message) {
+            var literalStart = 0;
+
+            for (var i = 0; i < format.Length; i++) {
+                var c = format[i];
+
+                if (c == '{' && i + 1 < format.Length) {
+                    if (format[i + 1] == '{') {
+                        WriteText(b, format.AsSpan(literalStart, i - literalStart));
+                        b.Write((byte)'{');
+                        i++;
+                        literalStart = i + 1;
+                        continue;
+                    }
+                    if (i + 2 < format.Length && format[i + 2] == '}' && format[i + 1] is '0' or '1') {
+                        WriteText(b, format.AsSpan(literalStart, i - literalStart));
+                        WriteText(b, format[i + 1] == '0' ? tag : message);
+                        i += 2;
+                        literalStart = i + 1;
+                        continue;
+                    }
+                } else if (c == '}' && i + 1 < format.Length && format[i + 1] == '}') {
+                    WriteText(b, format.AsSpan(literalStart, i - literalStart));
+                    b.Write((byte)'}');
+                    i++;
+                    literalStart = i + 1;
+                }
+            }
+
+            WriteText(b, format.AsSpan(literalStart, format.Length - literalStart));
         }
 
         void WriteFormat(ByteBuffer b, string format, object[] args) {
@@ -307,12 +350,11 @@ namespace ULogger {
                 case sbyte v: WriteInt(b, v); return;
                 case bool v: WriteAscii(b, v ? "True" : "False"); return;
                 case float v: WriteFloat(b, v); return;
-                case double v: WriteFloat(b, v); return;
+                case double v: WriteDouble(b, v); return;
                 case decimal v: WriteDecimal(b, v); return;
                 case char v: WriteChar(b, v); return;
-                // Enum.ToString() goes through reflection and allocates; print the numeric value.
                 case Enum v: WriteEnum(b, v); return;
-                default: WriteText(b, value.ToString().AsSpan()); return;
+                default: WriteText(b, (value.ToString() ?? string.Empty).AsSpan()); return;
             }
         }
 
@@ -322,10 +364,8 @@ namespace ULogger {
             WriteText(b, one);
         }
 
-        static void WriteEnum(ByteBuffer b, Enum value) {
-            if (Type.GetTypeCode(value.GetType()) == TypeCode.UInt64) WriteUInt(b, Convert.ToUInt64(value));
-            else WriteInt(b, Convert.ToInt64(value));
-        }
+        // Matches LogFormatter.WriteEnum: the name is worth the allocation, a bare ordinal is not.
+        void WriteEnum(ByteBuffer b, Enum value) => WriteText(b, value.ToString().AsSpan());
 
         void WriteText(ByteBuffer b, ReadOnlySpan<char> s) {
             if (s.Length == 0) return;
@@ -386,20 +426,36 @@ namespace ULogger {
             b.Length += written;
         }
 
-        static void WriteFloat(ByteBuffer b, double value) {
-            b.Ensure(32);
-            if (Utf8Formatter.TryFormat(value, new Span<byte>(b.Data, b.Length, b.Data.Length - b.Length), out var written))
+        // Formatted as a float rather than widened to double: (double)0.1f is 0.10000000149011612.
+        static void WriteFloat(ByteBuffer b, float value) {
+            for (var extra = 32; ; extra *= 2) {
+                b.Ensure(extra);
+                if (!Utf8Formatter.TryFormat(value, new Span<byte>(b.Data, b.Length, b.Data.Length - b.Length), out var written)) continue;
                 b.Length += written;
-            else
-                WriteAscii(b, "NaN");
+                return;
+            }
         }
 
-        static void WriteDecimal(ByteBuffer b, decimal value) {
-            b.Ensure(32);
-            if (Utf8Formatter.TryFormat(value, new Span<byte>(b.Data, b.Length, b.Data.Length - b.Length), out var written))
+        // TryFormat only fails for want of room, so grow and retry rather than printing "NaN",
+        // which reported a value the caller never passed.
+        static void WriteDouble(ByteBuffer b, double value) {
+            for (var extra = 32; ; extra *= 2) {
+                b.Ensure(extra);
+                if (!Utf8Formatter.TryFormat(value, new Span<byte>(b.Data, b.Length, b.Data.Length - b.Length), out var written)) continue;
                 b.Length += written;
-            else
-                WriteAscii(b, "NaN");
+                return;
+            }
+        }
+
+        // TryFormat only fails for want of room, so grow and retry rather than printing "NaN",
+        // which reported a value the caller never passed.
+        static void WriteDecimal(ByteBuffer b, decimal value) {
+            for (var extra = 32; ; extra *= 2) {
+                b.Ensure(extra);
+                if (!Utf8Formatter.TryFormat(value, new Span<byte>(b.Data, b.Length, b.Data.Length - b.Length), out var written)) continue;
+                b.Length += written;
+                return;
+            }
         }
 
         void Truncate(ByteBuffer b) {

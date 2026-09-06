@@ -51,9 +51,17 @@ namespace ULogger {
         }
 
         protected override bool IsEnabledInherit(LogLevel level) {
-            foreach (var logHandler in logHandlers)
-                if (logHandler != null && logHandler.IsEnabled(level)) return true;
-            return false;
+            // Guarded like the dispatch paths: a cycle here recurses just as fatally, and it is
+            // reached first -- Write asks IsEnabled before it ever enters WriteInherit.
+            var active = dispatching ??= new HashSet<CompositeLogHandler>();
+            if (!active.Add(this)) return false;
+            try {
+                foreach (var logHandler in logHandlers)
+                    if (logHandler != null && logHandler.IsEnabled(level)) return true;
+                return false;
+            } finally {
+                active.Remove(this);
+            }
         }
 
         protected override void WriteInherit(LogLevel level, ReadOnlySpan<char> tag, ReadOnlySpan<char> message, UnityEngine.Object? context) {

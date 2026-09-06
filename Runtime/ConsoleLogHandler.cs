@@ -45,11 +45,17 @@ namespace ULogger {
             }
         }
 
-        [SerializeField] Color infoColor = InfoColor;
+        [Header("Settings")]
         [SerializeField] LogLevel minLevel = LogLevel.Trace;
-        [SerializeField] string tagFormatOverride = "{0}: {1}";
-        [SerializeField] bool useColors = false;
 
+        [Header("Formatting")]
+        [Tooltip("How a tag and a message are combined. {0} is the tag, {1} the message. " +
+                 "Empty = fall back to the format the caller supplied.")]
+        [SerializeField] string tagFormat = "[{0}] {1}";
+        [SerializeField] bool useColors = false;
+        [SerializeField] Color infoColor = InfoColor;
+
+        [Header("Background threads")]
         [Tooltip("Capture a managed stack trace for entries logged off the main thread. " +
                  "Honours the project's per-LogType Stack Trace setting, but costs an allocation " +
                  "and symbol lookup at the call site.")]
@@ -81,19 +87,28 @@ namespace ULogger {
             pending ??= new SwapQueue<PendingEntry>(Mathf.Max(1, backgroundQueueCapacity));
 
         void OnEnable() {
-            colorWrappedFormats = null;
+            // Built here rather than lazily: the first entry may arrive on a background thread and
+            // ColorUtility is a Unity API.
+            BuildWrappedArgumentFormats();
             MainThreadDispatcher.Register(this);
         }
 
         void OnDisable() {
-            // Drain what is left; after unregistering nothing would ever emit it.
-            if (MainThreadDispatcher.IsMainThread) Pump();
+            // Drain what is left; after unregistering nothing would ever emit it. Routed through
+            // the dispatcher so the flush gets the same stack-trace suppression as a normal frame.
+            if (MainThreadDispatcher.IsMainThread) MainThreadDispatcher.PumpOnce(this);
             MainThreadDispatcher.Unregister(this);
         }
 
         void OnValidate() {
             backgroundQueueCapacity = Mathf.Max(1, backgroundQueueCapacity);
-            colorWrappedFormats = null;
+
+            // Rebuild rather than resize: the capacity is reported in the drop message, and a queue
+            // still claiming the old size would make that message a lie. Anything already queued is
+            // dropped, which is acceptable for an inspector edit.
+            if (pending != null && pending.Capacity != backgroundQueueCapacity) pending = null;
+
+            BuildWrappedArgumentFormats();
         }
 
         // ------------------------------------------------------------------ emit
@@ -116,8 +131,8 @@ namespace ULogger {
             // Unity's handler takes a string, so this path allocates one by definition.
             var builder = messageBuilder ??= new StringBuilder();
             builder.Clear();
-            if (tag.Length > 0) builder.Append('[').Append(tag).Append("] ");
-            builder.Append(message);
+            if (tag.Length == 0) builder.Append(message);
+            else AppendTagged(builder, tagFormat, tag, message);
 
             var logType = ToLogType(level);
             var text = builder.ToString();
@@ -137,18 +152,25 @@ namespace ULogger {
             var handler = DefaultHandler;
             if (handler == null) return false;
 
-            var formatOverride = args.Length == 0 ? format
-                : args.Length == 1 ? "{0}"
-                : !string.IsNullOrEmpty(tagFormatOverride) ? tagFormatOverride
+            // Only Unity's tag+message form is rewritten. The caller's own format is left intact:
+            // replacing it (as this used to, with "{0}") silently threw away the literal text of
+            // every genuine LogFormat call.
+            var effectiveFormat = IsTaggedCall(format, args) && !string.IsNullOrEmpty(tagFormat)
+                ? tagFormat
                 : format;
 
             if (MainThreadDispatcher.IsMainThread || !MainThreadDispatcher.IsInstalled) {
-                handler.LogFormat(logType, context, ModifyFormat(logType, formatOverride), args);
+                // "{0}" is by far the most common format (every Debug.Log goes through it) and its
+                // coloured variant is cached; anything else is wrapped on the spot.
+                var wrapped = effectiveFormat == "{0}"
+                    ? WrappedArgumentFormat(logType)
+                    : ModifyFormat(logType, effectiveFormat);
+                handler.LogFormat(logType, context, wrapped, args);
                 return true;
             }
 
             // args is owned by the caller and may be a reused buffer, so it cannot outlive this call.
-            return EnqueueOrReport(logType, string.Format(formatOverride, args), context);
+            return EnqueueOrReport(logType, string.Format(effectiveFormat, args), context);
         }
 
         bool EnqueueOrReport(LogType logType, string message, UnityEngine.Object? context) {
@@ -173,13 +195,17 @@ namespace ULogger {
             var handler = DefaultHandler;
             var count = queue.BeginDrain(out var entries);
             try {
-                if (handler == null) return;
+                // A null handler is not a reason to skip the bookkeeping below: leaving the drop
+                // counter set would keep HasPendingWork true forever and make the dispatcher run a
+                // full stack-trace save/restore cycle every single frame.
+                if (handler == null) count = 0;
 
                 for (var i = 0; i < count; i++) {
                     var entry = entries[i];
 
-                    // The object may have been destroyed between the log call and this frame;
-                    // Unity's null check is only meaningful here, on the main thread.
+                    // Unity's overloaded == reports a destroyed object as null, and only means
+                    // anything on the main thread; this normalizes such a context to a real null
+                    // so the console does not try to resolve a dead instance id.
                     var context = entry.Context == null ? null : entry.Context;
 
                     var message = entry.StackTrace == null
@@ -188,7 +214,7 @@ namespace ULogger {
 
                     // An exception is emitted as text rather than through LogException: the original
                     // object is long gone, and LogException would re-capture a trace pointing here.
-                    handler.LogFormat(entry.LogType, context, WrappedArgumentFormat(entry.LogType), message);
+                    handler!.LogFormat(entry.LogType, context, WrappedArgumentFormat(entry.LogType), message);
                 }
             } finally {
                 queue.EndDrain();
@@ -196,9 +222,12 @@ namespace ULogger {
 
             var dropped = queue.TakeDropped();
             if (dropped > 0) {
+                // No stack trace is attached and none would help: the frames that dropped an entry
+                // are long gone. Reported through the raw handler, bypassing minLevel, because it
+                // is a diagnostic about the logger itself.
                 handler?.LogFormat(LogType.Warning, this,
                     "[ULogger] {0}: dropped {1} background log entry/entries (queue capacity {2}).",
-                    name, dropped, backgroundQueueCapacity);
+                    name, dropped, queue.Capacity);
             }
         }
 
@@ -209,13 +238,47 @@ namespace ULogger {
         /// because it is otherwise rebuilt on every entry and there are only five variants.
         /// </summary>
         string WrappedArgumentFormat(LogType logType) {
-            var cache = colorWrappedFormats;
-            if (cache == null) {
-                cache = new string[5];
-                for (var i = 0; i < cache.Length; i++) cache[i] = ModifyFormat((LogType)i, "{0}");
-                colorWrappedFormats = cache;
-            }
+            var cache = colorWrappedFormats ?? BuildWrappedArgumentFormats();
             return cache[(int)logType];
+        }
+
+        string[] BuildWrappedArgumentFormats() {
+            var cache = new string[5];
+            for (var i = 0; i < cache.Length; i++) cache[i] = ModifyFormat((LogType)i, "{0}");
+            return colorWrappedFormats = cache;
+        }
+
+        /// <summary>
+        /// Applies a two-placeholder tag format to spans, without materializing either of them.
+        /// A hand-rolled scan because string.Format cannot take a ReadOnlySpan argument.
+        /// </summary>
+        static void AppendTagged(StringBuilder builder, string format, ReadOnlySpan<char> tag, ReadOnlySpan<char> message) {
+            if (string.IsNullOrEmpty(format)) {
+                builder.Append('[').Append(tag).Append("] ").Append(message);
+                return;
+            }
+
+            for (var i = 0; i < format.Length; i++) {
+                var c = format[i];
+
+                if (c == '{' && i + 1 < format.Length) {
+                    if (format[i + 1] == '{') {
+                        builder.Append('{');
+                        i++;
+                        continue;
+                    }
+                    if (i + 2 < format.Length && format[i + 2] == '}') {
+                        if (format[i + 1] == '0') { builder.Append(tag); i += 2; continue; }
+                        if (format[i + 1] == '1') { builder.Append(message); i += 2; continue; }
+                    }
+                } else if (c == '}' && i + 1 < format.Length && format[i + 1] == '}') {
+                    builder.Append('}');
+                    i++;
+                    continue;
+                }
+
+                builder.Append(c);
+            }
         }
 
         string ModifyFormat(LogType logType, string format) {

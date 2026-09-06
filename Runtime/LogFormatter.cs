@@ -72,7 +72,7 @@ namespace ULogger {
             if (typeof(T) == typeof(ulong)) { WriteUInt(b, UnsafeUtility.As<T, ulong>(ref value)); return; }
             if (typeof(T) == typeof(ushort)) { WriteUInt(b, UnsafeUtility.As<T, ushort>(ref value)); return; }
             if (typeof(T) == typeof(byte)) { WriteUInt(b, UnsafeUtility.As<T, byte>(ref value)); return; }
-            if (typeof(T) == typeof(float)) { WriteDouble(b, UnsafeUtility.As<T, float>(ref value)); return; }
+            if (typeof(T) == typeof(float)) { WriteFloat(b, UnsafeUtility.As<T, float>(ref value)); return; }
             if (typeof(T) == typeof(double)) { WriteDouble(b, UnsafeUtility.As<T, double>(ref value)); return; }
             if (typeof(T) == typeof(decimal)) { WriteDecimal(b, UnsafeUtility.As<T, decimal>(ref value)); return; }
             if (typeof(T) == typeof(bool)) { b.Append(UnsafeUtility.As<T, bool>(ref value) ? "True" : "False"); return; }
@@ -88,40 +88,60 @@ namespace ULogger {
                 case null: return;
                 case string s: b.Append(s.AsSpan()); return;
                 case Enum e: WriteEnum(b, e); return;
-                default: b.Append(value!.ToString().AsSpan()); return;
+                // A ToString() override is free to return null; treat that as an empty value
+                // rather than throwing from inside the logger.
+                default: b.Append((value!.ToString() ?? string.Empty).AsSpan()); return;
             }
         }
 
-        static void WriteEnum(CharBuffer b, Enum value) {
-            // Enum.ToString() goes through reflection and allocates; print the numeric value.
-            if (Type.GetTypeCode(value.GetType()) == TypeCode.UInt64) WriteUInt(b, Convert.ToUInt64(value));
-            else WriteInt(b, Convert.ToInt64(value));
-        }
+        // The one place a name is worth an allocation: a log line reading "3" instead of "Warning"
+        // is not a log line. Convert.ToInt64 on an Enum is not free either -- it boxes and goes
+        // through IConvertible -- so the numeric shortcut was buying less than it appeared to.
+        static void WriteEnum(CharBuffer b, Enum value) => b.Append(value.ToString().AsSpan());
 
         static void WriteInt(CharBuffer b, long value) {
             b.Ensure(20);
-            if (value.TryFormat(new Span<char>(b.Data, b.Length, b.Data.Length - b.Length), out var written))
-                b.Length += written;
+            value.TryFormat(new Span<char>(b.Data, b.Length, b.Data.Length - b.Length), out var written);
+            b.Length += written;
         }
 
         static void WriteUInt(CharBuffer b, ulong value) {
             b.Ensure(20);
-            if (value.TryFormat(new Span<char>(b.Data, b.Length, b.Data.Length - b.Length), out var written))
-                b.Length += written;
+            value.TryFormat(new Span<char>(b.Data, b.Length, b.Data.Length - b.Length), out var written);
+            b.Length += written;
         }
 
+        // Formatted as a float, not widened to double: (double)0.1f is 0.10000000149011612, and
+        // routing floats through WriteDouble printed exactly that.
+        static void WriteFloat(CharBuffer b, float value) {
+            for (var extra = 32; ; extra *= 2) {
+                b.Ensure(extra);
+                if (!value.TryFormat(new Span<char>(b.Data, b.Length, b.Data.Length - b.Length), out var written)) continue;
+                b.Length += written;
+                return;
+            }
+        }
+
+        // TryFormat only fails for want of room, so grow and retry. Appending "NaN" on failure,
+        // as this used to, reported a value the caller never passed.
         static void WriteDouble(CharBuffer b, double value) {
-            b.Ensure(32);
-            if (value.TryFormat(new Span<char>(b.Data, b.Length, b.Data.Length - b.Length), out var written))
+            for (var extra = 32; ; extra *= 2) {
+                b.Ensure(extra);
+                if (!value.TryFormat(new Span<char>(b.Data, b.Length, b.Data.Length - b.Length), out var written)) continue;
                 b.Length += written;
-            else b.Append("NaN");
+                return;
+            }
         }
 
+        // TryFormat only fails for want of room, so grow and retry. Appending "NaN" on failure,
+        // as this used to, reported a value the caller never passed.
         static void WriteDecimal(CharBuffer b, decimal value) {
-            b.Ensure(32);
-            if (value.TryFormat(new Span<char>(b.Data, b.Length, b.Data.Length - b.Length), out var written))
+            for (var extra = 32; ; extra *= 2) {
+                b.Ensure(extra);
+                if (!value.TryFormat(new Span<char>(b.Data, b.Length, b.Data.Length - b.Length), out var written)) continue;
                 b.Length += written;
-            else b.Append("NaN");
+                return;
+            }
         }
 
         // ------------------------------------------------------------------ format scanning

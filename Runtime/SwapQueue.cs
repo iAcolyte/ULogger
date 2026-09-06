@@ -21,6 +21,9 @@ namespace ULogger {
         int dropped;
         Bucket? draining;
 
+        /// <summary>Slots per bucket, fixed at construction.</summary>
+        public int Capacity => capacity;
+
         /// <summary>Number of entries lost because the active bucket was full.</summary>
         public int DroppedCount => Volatile.Read(ref dropped);
 
@@ -63,8 +66,15 @@ namespace ULogger {
         }
 
         /// <summary>
-        /// Swaps buckets and hands the filled one to the caller. Must be paired with <see cref="EndDrain"/>,
-        /// and only one thread may be inside a drain at a time.
+        /// Swaps buckets and hands the filled one to the caller. Must be paired with <see cref="EndDrain"/>
+        /// in a finally, from the same thread, and is neither re-entrant nor safe for two concurrent
+        /// drains: <c>draining</c> is plain single-consumer state.
+        /// <para>
+        /// Drain on a cadence, never in a tight loop. Each call flips <c>activeIndex</c>, and a
+        /// producer that observes the flip mid-reservation gives up its slot and retries; a
+        /// consumer that flips faster than a producer can finish a reservation livelocks it. Once
+        /// per frame, which is what the dispatcher does, is far below that threshold.
+        /// </para>
         /// </summary>
         public int BeginDrain(out T[] items) {
             var idx = activeIndex;
