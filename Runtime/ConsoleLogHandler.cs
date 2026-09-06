@@ -14,10 +14,6 @@ namespace ULogger {
 
         static readonly Color InfoColor = Color.gray;
 
-        // Unity's original handler, captured before any ULogHandler is installed (which happens no
-        // earlier than scene load). Forwarding here must never reach a ULogHandler, or the console
-        // would loop back into itself. The guard protects against state that survived a disabled
-        // domain reload.
         static ILogHandler? defaultHandler;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -26,9 +22,6 @@ namespace ULogger {
                 defaultHandler = Debug.unityLogger.logHandler;
             }
         }
-
-        readonly StringBuilder builder = new();
-
         static string ModifyFormat(bool useColors, Color infoColor, LogType logType, string format, StringBuilder builder) {
             if (!useColors) return format;
 
@@ -51,17 +44,20 @@ namespace ULogger {
             return builder.ToString();
         }
 
+
         [SerializeField] Color infoColor = InfoColor;
         [SerializeField] LogType logLevel = LogType.Log;
         [SerializeField] string tagFormatOverride = "{0}: {1}";
         [SerializeField] bool useColors = false;
 
-        protected override void LogExceptionInherit(Exception exception, UnityEngine.Object context) {
+        readonly StringBuilder builder = new();
+
+        protected override void LogExceptionInherit(Exception exception, UnityEngine.Object? context) {
             if (exception is IOverrideContextForException overriddenContext) context = overriddenContext.Context;
             defaultHandler?.LogException(exception, context);
         }
 
-        protected override bool LogFormatInherit(LogType logType, UnityEngine.Object context, string format, params object[] args) {
+        protected override bool LogFormatInherit(LogType logType, UnityEngine.Object? context, string format, params object[] args) {
             if (logType > logLevel) {
                 return false;
             }

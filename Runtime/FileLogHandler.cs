@@ -194,7 +194,7 @@ namespace ULogger {
             Writer.Enqueue(new ReadOnlySpan<byte>(b.Data, 0, b.Length), urgent);
         }
 
-        protected override void LogExceptionInherit(Exception exception, UnityEngine.Object context) {
+        protected override void LogExceptionInherit(Exception exception, UnityEngine.Object? context) {
             if (!logExceptions) return;
 
             // ToString() is the one allocation we cannot avoid: it builds the message and the
