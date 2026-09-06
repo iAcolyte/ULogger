@@ -28,9 +28,15 @@ namespace ULogger {
         [Header("Limits")]
         [Tooltip("Messages longer than this (in bytes) are truncated.")]
         [SerializeField] int maxMessageBytes = 16 * 1024;
+        [Tooltip("Size of each of the writer's two buffers, in bytes. Total burst capacity is twice this. " +
+                 "Keep it well above Max Message Bytes, otherwise bursts will be dropped.")]
+        [SerializeField] int bufferBytes = 256 * 1024;
 
         string? _path;
         AsyncFileWriter? _writer;
+
+        const int MinBufferBytes = 4096;
+        const int MinBufferToMessageRatio = 8;
 
         TimePart[]? _timeParts;
         byte[]? _timeLiterals;
@@ -63,7 +69,7 @@ namespace ULogger {
             get {
                 if (_writer is not null) return _writer;
 
-                _writer = new AsyncFileWriter(Path);   // was: _path (could be null)
+                _writer = new AsyncFileWriter(Path, Math.Max(bufferBytes, MinBufferBytes));
                 Application.quitting += CloseWriter;
 #if UNITY_EDITOR
                 UnityEditor.EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
@@ -99,9 +105,30 @@ namespace ULogger {
         }
 
         void OnValidate() {
+            if (bufferBytes < MinBufferBytes) bufferBytes = MinBufferBytes;
+            if (maxMessageBytes < 0) maxMessageBytes = 0;
+            WarnOnBufferSizing();
+
             CompileTimeFormat();
             CompileLevelLabels();
             CloseWriter();
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        void WarnOnBufferSizing() {
+            if (maxMessageBytes <= 0) return;
+
+            if (maxMessageBytes >= bufferBytes) {
+                Debug.LogWarning(
+                    $"[ULogger] {name}: Max Message Bytes ({maxMessageBytes}) is not smaller than Buffer Bytes " +
+                    $"({bufferBytes}). A single message can fill an entire buffer, so entries will be dropped " +
+                    "under load. Raise Buffer Bytes.", this);
+            } else if (maxMessageBytes * (long)MinBufferToMessageRatio > bufferBytes) {
+                Debug.LogWarning(
+                    $"[ULogger] {name}: Buffer Bytes ({bufferBytes}) holds fewer than {MinBufferToMessageRatio} " +
+                    $"messages of Max Message Bytes ({maxMessageBytes}). Bursts are likely to be dropped; " +
+                    $"consider at least {maxMessageBytes * (long)MinBufferToMessageRatio} bytes.", this);
+            }
         }
 
         void OnDisable() => CloseWriter();
