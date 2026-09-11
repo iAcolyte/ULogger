@@ -142,6 +142,22 @@ namespace ULogger {
             _ => LogLevel.Info
         };
 
+        /// <summary>
+        /// Converts a 1.0.x <c>logLevel</c> -- a <see cref="LogType"/>, compared as
+        /// <c>logType &gt; logLevel</c> -- into the <see cref="LogLevel"/> that keeps the same entries.
+        /// </summary>
+        internal static LogLevel MigrateLegacyLogLevel(LogType legacy) => legacy switch {
+            // LogType runs Error, Assert, Warning, Log, Exception: "Error" kept errors only, "Assert"
+            // added asserts (errors here too), "Warning" added warnings, "Log" and "Exception" let
+            // everything through.
+            LogType.Error or LogType.Assert => LogLevel.Error,
+            LogType.Warning => LogLevel.Warning,
+            _ => LogLevel.Trace
+        };
+
+        /// <summary>What a handler's legacy level field holds once there is nothing left to migrate.</summary>
+        internal const int NoLegacyLogLevel = -1;
+
         protected virtual object DedupScope => Type;
 
         protected abstract void LogExceptionInherit(Exception exception, UnityEngine.Object? context);

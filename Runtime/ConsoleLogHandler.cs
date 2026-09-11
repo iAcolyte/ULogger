@@ -4,10 +4,11 @@ using System;
 using System.Text;
 
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace ULogger {
     [CreateAssetMenu(fileName = "ConsoleLogHandler", menuName = "ULogger/Console Log")]
-    public sealed class ConsoleLogHandler: ULogHandler, IMainThreadPump {
+    public sealed class ConsoleLogHandler: ULogHandler, IMainThreadPump, ISerializationCallbackReceiver {
         // Unity's rich-text parser accepts these names verbatim; nameof keeps them tied to the
         // Color properties they stand for, so a typo cannot survive compilation.
         const string warningColor = nameof(Color.yellow);
@@ -50,8 +51,8 @@ namespace ULogger {
 
         [Header("Formatting")]
         [Tooltip("How a tag and a message are combined. {0} is the tag, {1} the message. " +
-                 "Empty = fall back to the format the caller supplied.")]
-        [SerializeField] string tagFormat = "[{0}] {1}";
+                 "Empty = Unity's own \"{0}: {1}\".")]
+        [SerializeField, FormerlySerializedAs("tagFormatOverride")] string tagFormat = "[{0}] {1}";
         [SerializeField] bool useColors = false;
         [SerializeField] Color infoColor = InfoColor;
 
@@ -64,6 +65,11 @@ namespace ULogger {
         [Tooltip("Entries buffered per frame for delivery from background threads. " +
                  "Entries beyond this are dropped, and the drop is reported to the console.")]
         [SerializeField] int backgroundQueueCapacity = 256;
+
+        // 1.0.x kept the filter under this name, as a LogType. Carried into minLevel on load and then
+        // cleared, so a re-saved asset holds only the new field. Hidden: nothing should set it by hand.
+        [SerializeField, HideInInspector, FormerlySerializedAs("logLevel")]
+        int legacyLogLevel = NoLegacyLogLevel;
 
         SwapQueue<PendingEntry>? pending;
         string[]? colorWrappedFormats;
@@ -85,6 +91,15 @@ namespace ULogger {
 
         SwapQueue<PendingEntry> Pending =>
             pending ??= new SwapQueue<PendingEntry>(Mathf.Max(1, backgroundQueueCapacity));
+
+        void ISerializationCallbackReceiver.OnBeforeSerialize() { }
+
+        // May run on a loading thread, so it touches nothing but this object's own fields.
+        void ISerializationCallbackReceiver.OnAfterDeserialize() {
+            if (legacyLogLevel < 0) return;
+            minLevel = MigrateLegacyLogLevel((LogType)legacyLogLevel);
+            legacyLogLevel = NoLegacyLogLevel;
+        }
 
         void OnEnable() {
             // Built here rather than lazily: the first entry may arrive on a background thread and
@@ -253,10 +268,9 @@ namespace ULogger {
         /// A hand-rolled scan because string.Format cannot take a ReadOnlySpan argument.
         /// </summary>
         static void AppendTagged(StringBuilder builder, string format, ReadOnlySpan<char> tag, ReadOnlySpan<char> message) {
-            if (string.IsNullOrEmpty(format)) {
-                builder.Append('[').Append(tag).Append("] ").Append(message);
-                return;
-            }
+            // Empty means Unity's own "{0}: {1}" -- the same thing LogFormatInherit falls back to,
+            // so both paths of this handler render a tag identically for any setting.
+            if (string.IsNullOrEmpty(format)) format = TaggedFormat;
 
             for (var i = 0; i < format.Length; i++) {
                 var c = format[i];

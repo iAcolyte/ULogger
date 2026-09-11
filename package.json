@@ -1,12 +1,12 @@
 {
     "name": "com.a-gorozhankin.ulogger",
-    "version": "1.0.4",
+    "version": "1.1.0",
     "displayName": "ULogger",
     "description": "Logger extension for more organized and flexible logs, include file logging",
-    "unity": "2019.1",
-    "unityRelease": "0b5",
+    "unity": "2021.2",
+    "unityRelease": "0f1",
     "documentationUrl": "",
-    "changelogUrl": "",
+    "changelogUrl": "https://github.com/iAcolyte/ULogger/blob/main/CHANGELOG.md",
     "licensesUrl": "",
     "keywords": [
         "Logger",

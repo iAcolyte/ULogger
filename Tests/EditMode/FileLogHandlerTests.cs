@@ -142,6 +142,17 @@ public class FileLogHandlerTests {
         Assert.AreEqual(lines[0], lines[1]);
     }
 
+    [Test]
+    public void EmptyTagFormatFallsBackToUnitysFormOnBothPaths() {
+        var handler = Make(("appendTimeFormat", ""), ("appendLogLevel", false), ("tagFormat", ""));
+
+        // Empty used to mean "net: message" on one path and [net] "message" on the other.
+        handler.Write(LogLevel.Info, "net".AsSpan(), "message".AsSpan(), null);
+        handler.LogFormat(LogType.Log, null, "{0}: {1}", "net", "message");
+
+        CollectionAssert.AreEqual(new[] { "net: message", "net: message" }, Flush(handler));
+    }
+
     // ------------------------------------------------------------------ formats
 
     [Test]

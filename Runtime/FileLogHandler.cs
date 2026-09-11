@@ -7,10 +7,11 @@ using System.Text;
 using System.Threading;
 
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace ULogger {
     [CreateAssetMenu(fileName = "FileLogHandler", menuName = "ULogger/File Log")]
-    public sealed class FileLogHandler: ULogHandler, IDisposable {
+    public sealed class FileLogHandler: ULogHandler, IDisposable, ISerializationCallbackReceiver {
         [Header("Settings")]
         [Tooltip("You can use special '%pdp' or '%dp' variables as persistentDataPath or DataPath, and '%dt' for datetime")]
         [SerializeField] string path = string.Empty;
@@ -34,6 +35,11 @@ namespace ULogger {
         [Tooltip("Size of each of the writer's two buffers, in bytes. Total burst capacity is twice this. " +
                  "Keep it well above Max Message Bytes, otherwise bursts will be dropped.")]
         [SerializeField] int bufferBytes = 256 * 1024;
+
+        // 1.0.x kept the filter under this name, as a LogType. Carried into minLevel on load and then
+        // cleared, so a re-saved asset holds only the new field. Hidden: nothing should set it by hand.
+        [SerializeField, HideInInspector, FormerlySerializedAs("logLevel")]
+        int legacyLogLevel = NoLegacyLogLevel;
 
         string? _path;
         AsyncFileWriter? _writer;
@@ -111,6 +117,15 @@ namespace ULogger {
 
         // ------------------------------------------------------------------ lifecycle
 
+        void ISerializationCallbackReceiver.OnBeforeSerialize() { }
+
+        // May run on a loading thread, so it touches nothing but this object's own fields.
+        void ISerializationCallbackReceiver.OnAfterDeserialize() {
+            if (legacyLogLevel < 0) return;
+            minLevel = MigrateLegacyLogLevel((LogType)legacyLogLevel);
+            legacyLogLevel = NoLegacyLogLevel;
+        }
+
         void OnEnable() {
             CompileTimeFormat();
             CompileLevelLabels();
@@ -156,16 +171,11 @@ namespace ULogger {
         protected override void WriteInherit(LogLevel level, ReadOnlySpan<char> tag, ReadOnlySpan<char> message, UnityEngine.Object? context) {
             var b = BeginEntry(ToLogType(level));
 
-            if (tag.Length > 0 && !string.IsNullOrEmpty(tagFormat)) {
-                // Same tagFormat as the ILogHandler path; hardcoding the layout here made the two
-                // paths of one handler render a tag differently as soon as the format was edited.
-                WriteTagged(b, tagFormat, tag, message);
+            if (tag.Length > 0) {
+                // Same rule as the ILogHandler path: tagFormat, or Unity's own "{0}: {1}" when it is
+                // empty. A hardcoded layout here used to make the two paths disagree.
+                WriteTagged(b, string.IsNullOrEmpty(tagFormat) ? TaggedFormat : tagFormat, tag, message);
             } else {
-                if (tag.Length > 0) {
-                    b.Write((byte)'[');
-                    WriteText(b, tag);
-                    WriteAscii(b, "] ");
-                }
                 b.Write((byte)'"');
                 WriteText(b, message);
                 b.Write((byte)'"');
