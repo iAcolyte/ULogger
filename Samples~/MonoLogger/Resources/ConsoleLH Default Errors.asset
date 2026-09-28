@@ -13,8 +13,11 @@ MonoBehaviour:
   m_Name: ConsoleLH Default Errors
   m_EditorClassIdentifier: ULogger::ULogger.ConsoleLogHandler
   tags: []
-  infoColor: {r: 0.7, g: 0.7, b: 0.7, a: 1}
-  logLevel: 0
-  tagFormatOverride: '{0}: {1}'
   logExceptions: 1
+  minLevel: 4
+  tagFormat: '{0}: {1}'
   useColors: 1
+  infoColor: {r: 0.7, g: 0.7, b: 0.7, a: 1}
+  captureBackgroundStackTrace: 0
+  backgroundQueueCapacity: 256
+  legacyLogLevel: -1

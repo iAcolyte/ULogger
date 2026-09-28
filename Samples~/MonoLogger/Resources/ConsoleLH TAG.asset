@@ -14,8 +14,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: ULogger::ULogger.ConsoleLogHandler
   tags:
   - TAG
-  infoColor: {r: 0.80098504, g: 1, b: 0.4292453, a: 1}
-  logLevel: 3
-  tagFormatOverride: '[{0}] {1}'
   logExceptions: 1
+  minLevel: 0
+  tagFormat: '[{0}] {1}'
   useColors: 1
+  infoColor: {r: 0.80098504, g: 1, b: 0.4292453, a: 1}
+  captureBackgroundStackTrace: 0
+  backgroundQueueCapacity: 256
+  legacyLogLevel: -1

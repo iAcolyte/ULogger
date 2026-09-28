@@ -13,6 +13,8 @@ MonoBehaviour:
   m_Name: CompositeLH
   m_EditorClassIdentifier: ULogger::ULogger.CompositeLogHandler
   tags: []
+  logExceptions: 1
   logHandlers:
   - {fileID: 11400000, guid: e9d8dd272a0834a699afad507cb72799, type: 2}
   - {fileID: 11400000, guid: f552bffe489574e6a8160348db678c6c, type: 2}
+  - {fileID: 11400000, guid: 7ba66a1776bb4429695ff342732c13db, type: 2}

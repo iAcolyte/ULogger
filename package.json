@@ -1,5 +1,5 @@
 {
-    "name": "com.a-gorozhankin.ulogger",
+    "name": "com.iacolyte.ulogger",
     "version": "1.1.0",
     "displayName": "ULogger",
     "description": "Logger extension for more organized and flexible logs, include file logging",
@@ -16,7 +16,7 @@
     "samples": [
         {
             "displayName": "MonoLogger",
-            "description": "Simple implementation of ULogger as MonoBehaviour",
+            "description": "A scene that installs a handler chain at startup and logs through both paths: UnityEngine.Debug and the allocation-free ILogSink API, with console and file output",
             "path": "Samples~/MonoLogger"
         }
     ],

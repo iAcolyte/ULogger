@@ -25,6 +25,7 @@ Handler assets saved with 1.0.x are migrated automatically on load; see **Upgrad
 - A call is treated as tagged only in the exact shape Unity's `Logger.Log(tag, message)` produces. Previously any call whose first argument was a listed tag matched.
 - Exceptions are filtered the same way by every handler and API: by `logExceptions`, and by `minLevel` as `Critical`; never by tag.
 - An empty `tagFormat` means Unity's own `"{0}: {1}"`, identically for `Debug.Log*` calls and the allocation-free API.
+- The `MonoLogger` sample is rebuilt around the startup bootstrap: its scene no longer swaps the handler, its assets are saved in the 1.1.0 format, the file handler is part of the chain, and a second script demonstrates `ILogSink`, `WithTag`/`For` and logging from a worker thread.
 
 ### Fixed
 

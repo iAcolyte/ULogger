@@ -43,7 +43,9 @@ namespace ULogger
 
 > **Important:** Install in `BeforeSceneLoad` (or any phase after `SubsystemRegistration`), **not** in `SubsystemRegistration`. `ConsoleLogHandler` captures Unity's original handler during `SubsystemRegistration`, and the order of methods within the same phase is undefined — installing in a later phase guarantees the capture happens first, so console output is not lost.
 
-If you prefer to scope logging to a specific scene, a `MonoBehaviour` that swaps `Debug.unityLogger.logHandler` in `OnEnable` and restores it in `OnDisable` works too (see the `MonoLogger` sample).
+The `MonoLogger` sample ships exactly this bootstrap together with a ready-made handler chain; import it from the Package Manager to see the output of every path described below.
+
+If you prefer to scope logging to a specific scene, a `MonoBehaviour` that swaps `Debug.unityLogger.logHandler` in `OnEnable` and restores it in `OnDisable` works too — just remember that restoring it on `OnDisable` also undoes any handler installed at startup.
 
 ## Usage
 
