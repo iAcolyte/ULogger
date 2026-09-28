@@ -23,6 +23,13 @@ namespace ULogger {
 
         public bool IsEnabled(LogLevel level) => Sink.IsEnabled(level);
 
+        /// <summary>
+        /// Writes a message built by hand, typically in <see cref="LogFormatter.Scratch"/> for more
+        /// than four arguments. Check <see cref="IsEnabled"/> before building it.
+        /// </summary>
+        public void Write(LogLevel level, ReadOnlySpan<char> message)
+            => Sink.Write(level, Tag.AsSpan(), message, Context);
+
         public void Trace(string message) {
             if (!Sink.IsEnabled(LogLevel.Trace)) return;
             Sink.Write(LogLevel.Trace, Tag.AsSpan(), message.AsSpan(), Context);

@@ -241,4 +241,37 @@ public class ULogHandlerTests {
         Assert.AreEqual(1, a.Writes.Count);
         Assert.AreEqual(1, b.Writes.Count);
     }
+
+    // ------------------------------------------------------------------ prebuilt messages
+
+    [Test]
+    public void Write_TakesAMessageBuiltInScratch() {
+        var handler = Make<RecordingLogHandler>();
+        ILogSink sink = handler;
+
+        var b = LogFormatter.Scratch;
+        b.Append("t=").Append(1.5f, "F3").Append(" n=").Append(7);
+        sink.Write(LogLevel.Info, b.Span);
+
+        CollectionAssert.AreEqual(new[] { "t=1.500 n=7" }, handler.Writes);
+    }
+
+    [Test]
+    public void TaggedWrite_CarriesTheBoundTag() {
+        var handler = Make<RecordingLogHandler>(("tags", new[] { "net" }));
+
+        handler.WithTag("net").Write(LogLevel.Info, "kept".AsSpan());
+        handler.WithTag("audio").Write(LogLevel.Info, "dropped".AsSpan());
+
+        CollectionAssert.AreEqual(new[] { "[net] kept" }, handler.Writes);
+    }
+
+    [Test]
+    public void TaggedWrite_RespectsTheLevel() {
+        var handler = Make<RecordingLogHandler>(("MinLevel", LogLevel.Warning));
+
+        handler.WithTag("net").Write(LogLevel.Info, "dropped".AsSpan());
+
+        Assert.AreEqual(0, handler.Writes.Count);
+    }
 }

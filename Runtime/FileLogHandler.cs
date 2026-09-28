@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using System.Threading;
 
@@ -325,10 +326,20 @@ namespace ULogger {
                         hasDigits = true;
                     }
 
-                    if (hasDigits && j < format.Length && format[j] == '}') {
+                    // "{n:spec}": the spec runs to the next '}', unless a '{' comes first, in which
+                    // case the brace is missing and the text stays literal.
+                    var specStart = j + 1;
+                    var close = j;
+                    if (hasDigits && j < format.Length && format[j] == ':') {
+                        close = specStart;
+                        while (close < format.Length && format[close] != '}' && format[close] != '{') close++;
+                    }
+
+                    if (hasDigits && close < format.Length && format[close] == '}') {
                         WriteText(b, format.AsSpan(literalStart, i - literalStart));
-                        if (index < args.Length) WriteValue(b, args[index]);
-                        i = j + 1;
+                        var spec = close > j ? format.AsSpan(specStart, close - specStart) : default;
+                        if (index < args.Length) WriteValue(b, args[index], spec);
+                        i = close + 1;
                         literalStart = i;
                         continue;
                     }
@@ -346,7 +357,24 @@ namespace ULogger {
             WriteText(b, format.AsSpan(literalStart, format.Length - literalStart));
         }
 
-        void WriteValue(ByteBuffer b, object? value) {
+        void WriteValue(ByteBuffer b, object? value) => WriteValue(b, value, default);
+
+        // Utf8Formatter only knows single-letter formats, not "+0.0;-0.0", so a spec goes through
+        // IFormattable. This path boxed its arguments already; one more string changes little.
+        void WriteValue(ByteBuffer b, object? value, ReadOnlySpan<char> spec) {
+            if (spec.Length > 0 && value is IFormattable formattable && value is not Enum) {
+                string? text;
+                try {
+                    text = formattable.ToString(new string(spec), CultureInfo.InvariantCulture);
+                } catch (FormatException) {
+                    text = null; // a bad spec: print the value as if there were none
+                }
+                if (text != null) {
+                    WriteText(b, text.AsSpan());
+                    return;
+                }
+            }
+
             switch (value) {
                 case null: return;
                 case string s: WriteText(b, s.AsSpan()); return;
@@ -364,6 +392,8 @@ namespace ULogger {
                 case decimal v: WriteDecimal(b, v); return;
                 case char v: WriteChar(b, v); return;
                 case Enum v: WriteEnum(b, v); return;
+                // Invariant like the numbers above; matches LogFormatter on the ILogSink path.
+                case IFormattable v: WriteText(b, (v.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty).AsSpan()); return;
                 default: WriteText(b, (value.ToString() ?? string.Empty).AsSpan()); return;
             }
         }

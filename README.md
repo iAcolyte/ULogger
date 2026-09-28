@@ -85,9 +85,21 @@ public class Inventory : MonoBehaviour
 ```
 
 - Methods: `Trace`, `Debug`, `Info`, `Warning`, `Error`, `Critical`, each with zero to four arguments.
-- Placeholders are `{0}`–`{3}`. Format specifiers such as `{0:F2}` are not supported and are printed verbatim, as is a placeholder with no matching argument.
-- Numbers, `bool` and `char` are written without allocating. Enums are written by name, other types through `ToString()`.
-- For more than four arguments, build the message into `LogFormatter.Scratch` yourself and pass its `Span` to `ILogSink.Write`.
+- Placeholders are `{0}`–`{3}`, optionally with a format specifier: `{0:F3}`, `{1:N0}`, `{2:X}`, or a custom one such as `{0:+0.0;-0.0}`. A placeholder with no matching argument is printed verbatim, spec included, and so is a malformed one such as `{0:F3` with no closing brace. An invalid spec (`{0:Q}`) prints the value as if there were none.
+- Numbers are always formatted in the invariant culture: `0.5f` prints as `0.5` on every machine, whatever its locale. A log is parsed by tools, and a decimal comma breaks them.
+- Numbers, `bool` and `char` are written without allocating, with or without a spec. Enums are written by name and ignore the spec. Types implementing `IFormattable` (`Vector3`, `DateTime`, `TimeSpan`, …) get the spec and the invariant culture, other types go through `ToString()`; both allocate.
+- For more than four arguments, build the message yourself and write it with `Write(level, message)`, available on `ILogSink` and on `TaggedLogSink`:
+
+  ```csharp
+  if (!log.IsEnabled(LogLevel.Debug)) return;
+  var b = LogFormatter.Scratch;
+  b.Append("segment hand=").Append(handedness)
+   .Append(" t=").Append(Time.time, "F3")
+   .Append(" dt=").Append(Time.deltaTime * 1000f, "F1").Append("ms");
+  log.Write(LogLevel.Debug, b.Span);
+  ```
+
+  `CharBuffer.Append(value)` and `Append(value, spec)` print a value exactly as `{0}` and `{0:spec}` would.
 - `TaggedLogSink` is a readonly struct: keeping one in a field costs nothing.
 
 ### Log Levels

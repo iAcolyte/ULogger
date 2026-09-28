@@ -6,13 +6,26 @@ namespace ULogger {
     /// <summary>
     /// The zero-allocation logging API. Static and generic by arity: every call is instantiated at
     /// the call site with concrete argument types, so nothing is boxed and no object[] is built.
-    /// Beyond 4 arguments, format the message yourself into <see cref="LogFormatter.Scratch"/>.
+    /// Beyond 4 arguments, build the message yourself and hand it to <see cref="Write"/>:
+    /// <code>
+    /// if (!log.IsEnabled(LogLevel.Debug)) return;
+    /// var b = LogFormatter.Scratch;
+    /// b.Append("t=").Append(Time.time, "F3").Append(" dt=").Append(Time.deltaTime * 1000f, "F1").Append("ms");
+    /// log.Write(LogLevel.Debug, b.Span);
+    /// </code>
     ///
     /// Tag and context are not parameters here: an overload taking a leading string tag would be
     /// indistinguishable from one taking a format plus a string argument. Both are bound up front
     /// through <see cref="WithTag"/> / <see cref="For"/>, which cost nothing to carry.
     /// </summary>
     public static class LogSinkExtensions {
+        /// <summary>
+        /// Writes a message built by hand, untagged and without a context. Check
+        /// <see cref="ILogSink.IsEnabled"/> before building it.
+        /// </summary>
+        public static void Write(this ILogSink sink, LogLevel level, ReadOnlySpan<char> message)
+            => sink.Write(level, default, message, null);
+
         public static void Trace(this ILogSink sink, string message) {
             if (!sink.IsEnabled(LogLevel.Trace)) return;
             sink.Write(LogLevel.Trace, default, message.AsSpan(), null);

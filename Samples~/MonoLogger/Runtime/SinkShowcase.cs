@@ -44,6 +44,21 @@ namespace ULogger.MonoLogger
             gameplay.Info("player {0} entered zone {1}", "p1", 3);
             gameplay.Warning("inventory is {0}% full", 92.5f);
 
+            // Format specifiers work as in string.Format, always in the invariant culture, so the
+            // file stays parseable on any machine whatever its locale.
+            gameplay.Info("t={0:F3} offset={1:+0.0;-0.0}mm", Time.time, -1.25f);
+
+            // Past four arguments, build the message in the pooled scratch buffer and write it.
+            if (gameplay.IsEnabled(LogLevel.Debug))
+            {
+                var b = LogFormatter.Scratch;
+                b.Append("frame=").Append(Time.frameCount)
+                 .Append(" t=").Append(Time.time, "F3")
+                 .Append(" dt=").Append(Time.deltaTime * 1000f, "F1").Append("ms")
+                 .Append(" pos=").Append(transform.position, "F2");
+                gameplay.Write(LogLevel.Debug, b.Span);
+            }
+
             // IsEnabled before formatting: the idiom for a message whose arguments are expensive to
             // produce. A disabled level then costs one virtual call and nothing else.
             if (sink.IsEnabled(LogLevel.Trace)) sink.Trace("scene dump: {0}", DescribeScene());

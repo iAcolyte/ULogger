@@ -193,6 +193,45 @@ public class FileLogHandlerTests {
         Assert.AreEqual("0.1 0.1", Flush(handler)[0]);
     }
 
+    [Test]
+    public void AppliesFormatSpecifiersOnTheLogFormatPath() {
+        var handler = Make(("appendTimeFormat", ""), ("appendLogLevel", false));
+
+        // Printed verbatim as "{0:F2}" before; the console, going through string.Format, did not.
+        handler.LogFormat(LogType.Log, null, "{0:F2} {1:+0.0;-0.0} {2:D3} {10:X}", 1.5f, -2d, 7,
+            0, 0, 0, 0, 0, 0, 0, 255);
+
+        Assert.AreEqual("1.50 -2.0 007 FF", Flush(handler)[0]);
+    }
+
+    [Test]
+    public void CopiesMalformedSpecifiersVerbatimOnTheLogFormatPath() {
+        var handler = Make(("appendTimeFormat", ""), ("appendLogLevel", false));
+
+        handler.LogFormat(LogType.Log, null, "a {0:F2 b {0}", 1);
+
+        Assert.AreEqual("a {0:F2 b 1", Flush(handler)[0]);
+    }
+
+    [Test]
+    public void FormatsInTheInvariantCultureOnBothPaths() {
+        var handler = Make(("appendTimeFormat", ""), ("appendLogLevel", false));
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        try {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("ru-RU");
+
+            handler.LogFormat(LogType.Log, null, "{0} {1:F1}", 0.5f, 0.26d);
+            handler.Info("{0} {1:F1}", 0.5f, 0.26d);
+        } finally {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
+
+        var lines = Flush(handler);
+        Assert.AreEqual("0.5 0.3", lines[0]);
+        // The span path quotes an untagged message, the same as a plain Debug.Log.
+        Assert.AreEqual("\"0.5 0.3\"", lines[1]);
+    }
+
     // ------------------------------------------------------------------ text handling
 
     [Test]
